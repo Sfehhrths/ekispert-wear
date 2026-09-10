@@ -14,6 +14,9 @@ jobs:
   build:
     name: Build APKs
     runs-on: ubuntu-latest
+    env:
+      # `secrets` cannot be referenced in a step `if`; expose it through env instead.
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,9 +37,8 @@ jobs:
       # release key comes from repository secrets. Without them (forks, PRs) the build falls
       # back to the debug key.
       - name: Restore signing key
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
