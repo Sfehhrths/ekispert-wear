@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">駅すぱあと Wear</string>
+    <string name="tile_route">駅すぱあと 経路</string>
+    <string name="tile_timer">駅すぱあと タイマー</string>
+    <string name="tile_imakoko">駅すぱあと イマココ</string>
+</resources>

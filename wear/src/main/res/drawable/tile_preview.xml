@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Placeholder preview shown in the tile picker. Replace with a real screenshot later. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="192dp"
+    android:height="192dp"
+    android:viewportWidth="192"
+    android:viewportHeight="192">
+    <path
+        android:fillColor="#FF202124"
+        android:pathData="M96,0a96,96 0 1,0 0.01,0z" />
+    <path
+        android:fillColor="#FF0078F0"
+        android:pathData="M48,88h96v16h-96z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M40,80a16,16 0 1,0 0.01,0z M136,80a16,16 0 1,0 0.01,0z" />
+</vector>
