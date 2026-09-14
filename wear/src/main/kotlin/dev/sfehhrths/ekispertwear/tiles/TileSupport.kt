@@ -34,8 +34,8 @@ object AwArgb {
 }
 
 /**
- * Common plumbing for the three tiles: builds the Tile from a layout, resources, click-to-open.
- * Subclasses only implement [layout].
+ * Common plumbing for the three tiles: builds the Tile from a layout, resources, click-to-open
+ * (on the page named by [launchPage]). Subclasses implement [layout] and [launchPage].
  */
 abstract class CourseTileBase : TileService() {
 
@@ -43,6 +43,9 @@ abstract class CourseTileBase : TileService() {
 
     /** Re-request interval; 0 = only when the app asks. */
     open val freshnessMillis: Long = 0
+
+    /** Page ([MainActivity.PAGE_IMAKOKO] etc.) the app opens on when the tile is tapped. */
+    abstract val launchPage: Int
 
     override fun onTileRequest(request: RequestBuilders.TileRequest): ListenableFuture<TileBuilders.Tile> =
         CallbackToFutureAdapter.getFuture { completer ->
@@ -79,6 +82,7 @@ abstract class CourseTileBase : TileService() {
                     ActionBuilders.AndroidActivity.Builder()
                         .setPackageName(packageName)
                         .setClassName(MainActivity::class.java.name)
+                        .addKeyToExtraMapping(MainActivity.EXTRA_PAGE, ActionBuilders.AndroidIntExtra.Builder().setValue(launchPage).build())
                         .build(),
                 )
                 .build(),

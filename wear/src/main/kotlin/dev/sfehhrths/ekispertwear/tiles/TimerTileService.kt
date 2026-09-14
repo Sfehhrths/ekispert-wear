@@ -10,6 +10,7 @@ import androidx.wear.protolayout.ModifiersBuilders
 import androidx.wear.protolayout.TypeBuilders
 import androidx.wear.protolayout.expression.DynamicBuilders
 import dev.sfehhrths.ekispertwear.CourseLogic
+import dev.sfehhrths.ekispertwear.MainActivity
 import dev.sfehhrths.ekispertwear.shared.Course
 import java.time.Instant
 
@@ -21,6 +22,9 @@ import java.time.Instant
 class TimerTileService : CourseTileBase() {
 
     override val freshnessMillis: Long = 60_000
+
+    /** Tapping the tile opens the app on the タイマー page. */
+    override val launchPage: Int = MainActivity.PAGE_TIMER
 
     override fun layout(course: Course?, now: Long): LayoutElement {
         val target = course?.let { CourseLogic.timerTarget(it, now) }

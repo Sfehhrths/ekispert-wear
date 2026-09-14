@@ -5,6 +5,7 @@ import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.LayoutElementBuilders.LayoutElement
 import dev.sfehhrths.ekispertwear.CourseLogic
 import dev.sfehhrths.ekispertwear.CourseLogic.hhmm
+import dev.sfehhrths.ekispertwear.MainActivity
 import dev.sfehhrths.ekispertwear.shared.Course
 import dev.sfehhrths.ekispertwear.shared.Line
 
@@ -15,6 +16,9 @@ import dev.sfehhrths.ekispertwear.shared.Line
 class RouteTileService : CourseTileBase() {
 
     override val freshnessMillis: Long = 60_000
+
+    /** Tapping the tile opens the app on the 経路 page. */
+    override val launchPage: Int = MainActivity.PAGE_ROUTE
 
     override fun layout(course: Course?, now: Long): LayoutElement {
         if (course == null) return column(titleRow("経路"), spacer(40f), text("経路がありません", 13f, AwArgb.SECONDARY, align = LayoutElementBuilders.TEXT_ALIGN_CENTER), horizontalAlign = LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)

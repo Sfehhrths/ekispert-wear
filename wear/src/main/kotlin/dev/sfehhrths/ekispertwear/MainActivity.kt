@@ -1,6 +1,7 @@
 package dev.sfehhrths.ekispertwear
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -79,21 +80,32 @@ import dev.sfehhrths.ekispertwear.ui.AwColors
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private const val PAGE_IMAKOKO = 0
-private const val PAGE_ROUTE = 1
-private const val PAGE_TIMER = 2
-
 /** Non-null while the watch is in ambient (always-on) mode. */
 private data class AmbientState(val burnInProtection: Boolean, val lowBit: Boolean)
 
 private val LocalAmbient = compositionLocalOf<AmbientState?> { null }
 
+/** A page the launching intent asked for; [seq] makes repeated requests for the same page distinct. */
+private data class PageRequest(val page: Int, val seq: Long)
+
 class MainActivity : ComponentActivity() {
+    companion object {
+        const val PAGE_IMAKOKO = 0
+        const val PAGE_ROUTE = 1
+        const val PAGE_TIMER = 2
+
+        /** Int extra: page to show on launch (one of the PAGE_* constants). Set by the tiles. */
+        const val EXTRA_PAGE = "page"
+    }
+
     private var ambient by mutableStateOf<AmbientState?>(null)
 
     /** Bumped on every ambient refresh (about once a minute); pages re-derive "now" from it. */
     private var ambientTick by mutableLongStateOf(0L)
     private var askedNotificationPermission = false
+
+    /** Page requested by the latest intent carrying [EXTRA_PAGE]; null when launched normally. */
+    private var pageRequest by mutableStateOf<PageRequest?>(null)
 
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -112,6 +124,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         CourseStore.init(this)
+        applyPageRequest(intent)
         ambientObserver = AmbientLifecycleObserver(this, object : AmbientLifecycleObserver.AmbientLifecycleCallback {
             override fun onEnterAmbient(ambientDetails: AmbientLifecycleObserver.AmbientDetails) {
                 val active = countdownActive()
@@ -151,10 +164,24 @@ class MainActivity : ComponentActivity() {
                 val payload by CourseStore.payload.collectAsStateWithLifecycle()
                 LaunchedEffect(Unit) { CourseStore.refreshFromDataLayer(this@MainActivity) }
                 CompositionLocalProvider(LocalAmbient provides ambient) {
-                    Root(payload, ambientTick)
+                    Root(payload, ambientTick, pageRequest)
                 }
             }
         }
+    }
+
+    /** singleTop: a tile tap while we are already running lands here instead of in a new instance. */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyPageRequest(intent)
+    }
+
+    private fun applyPageRequest(intent: Intent?) {
+        if (intent?.hasExtra(EXTRA_PAGE) != true) return
+        val page = intent.getIntExtra(EXTRA_PAGE, PAGE_ROUTE).coerceIn(PAGE_IMAKOKO, PAGE_TIMER)
+        Log.i(CourseStore.TAG, "launch requested page $page")
+        pageRequest = PageRequest(page, (pageRequest?.seq ?: 0L) + 1)
     }
 
     override fun onStop() {
@@ -242,9 +269,13 @@ private fun burnInOffset(tick: Long): DpOffset {
 }
 
 @Composable
-private fun Root(payload: CoursePayload?, ambientTick: Long) {
+private fun Root(payload: CoursePayload?, ambientTick: Long, pageRequest: PageRequest?) {
     val ambient = LocalAmbient.current
-    val pagerState = rememberPagerState(initialPage = PAGE_ROUTE) { 3 }
+    // A cold start opens straight on the requested page; a later request (onNewIntent) scrolls to it.
+    val pagerState = rememberPagerState(initialPage = pageRequest?.page ?: MainActivity.PAGE_ROUTE) { 3 }
+    LaunchedEffect(pageRequest) {
+        if (pageRequest != null && pagerState.currentPage != pageRequest.page) pagerState.scrollToPage(pageRequest.page)
+    }
     val now = rememberNow(ambient != null, ambientTick)
     val indicatorState = remember(pagerState) {
         object : PageIndicatorState {
@@ -264,8 +295,8 @@ private fun Root(payload: CoursePayload?, ambientTick: Long) {
         ) {
             HorizontalPager(state = pagerState, beyondViewportPageCount = 2, userScrollEnabled = ambient == null) { page ->
                 when (page) {
-                    PAGE_IMAKOKO -> ImakokoPage(payload?.course, now, pagerState, page)
-                    PAGE_ROUTE -> RoutePage(payload?.course, pagerState, page)
+                    MainActivity.PAGE_IMAKOKO -> ImakokoPage(payload?.course, now, pagerState, page)
+                    MainActivity.PAGE_ROUTE -> RoutePage(payload?.course, pagerState, page)
                     else -> TimerPage(payload?.course, now)
                 }
             }

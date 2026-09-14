@@ -7,6 +7,7 @@ import androidx.wear.protolayout.LayoutElementBuilders
 import androidx.wear.protolayout.LayoutElementBuilders.LayoutElement
 import androidx.wear.protolayout.ModifiersBuilders
 import dev.sfehhrths.ekispertwear.CourseLogic
+import dev.sfehhrths.ekispertwear.MainActivity
 import dev.sfehhrths.ekispertwear.shared.Course
 
 /**
@@ -16,6 +17,9 @@ import dev.sfehhrths.ekispertwear.shared.Course
 class ImakokoTileService : CourseTileBase() {
 
     override val freshnessMillis: Long = 60_000
+
+    /** Tapping the tile opens the app on the イマココ page. */
+    override val launchPage: Int = MainActivity.PAGE_IMAKOKO
 
     override fun layout(course: Course?, now: Long): LayoutElement {
         if (course == null) return column(titleRow("イマココ"), spacer(40f), text("経路がありません", 13f, AwArgb.SECONDARY, align = LayoutElementBuilders.TEXT_ALIGN_CENTER), horizontalAlign = LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
