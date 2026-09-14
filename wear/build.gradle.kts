@@ -84,4 +84,7 @@ dependencies {
     // Always-on (AmbientLifecycleObserver) and the Ongoing Activity chip on the watch face.
     implementation(libs.wear.core)
     implementation(libs.wear.ongoing)
+    // androidx.wear:wear drags in fragment 1.2.4; registerForActivityResult() in MainActivity makes
+    // lintVitalRelease fail (InvalidFragmentVersionForActivityResult) unless fragment >= 1.3.0.
+    implementation(libs.androidx.fragment)
 }
