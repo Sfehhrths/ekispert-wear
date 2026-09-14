@@ -18,6 +18,9 @@ import java.io.StringReader
  */
 object EkispertXmlParser {
 
+    /** Clock jumps larger than this between consecutive stop times are treated as a date change. */
+    private const val HALF_DAY_SECONDS = 12 * 3600
+
     fun parseCourses(xml: String): List<Course> {
         val parser = Xml.newPullParser().apply {
             setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -233,23 +236,45 @@ object EkispertXmlParser {
     }
 
     /**
-     * Stop times come as `HH:mm:ss+09:00` (no date). Attach the leg's departure date and roll
-     * over to the next day whenever the clock time goes backwards along the sequence.
+     * Stop times come as `HH:mm:ss+09:00` (no date). Attach the leg's departure date, then walk
+     * the sequence and pick, for each clock time, the day closest to the previous time: a jump
+     * backwards of more than 12 hours means the next day, a jump forwards of more than 12 hours
+     * means the previous day. Small reversals are normal and must NOT roll the date: the boarding
+     * stop's ArrivalState (when the train pulled in) precedes the leg's departure time, and a
+     * stop's arrival can be listed one minute after its departure in the raw data.
      */
     private fun resolveStops(raw: List<RawStop>, legDeparture: String): List<Stop> {
         if (raw.isEmpty()) return emptyList()
         val datePart = legDeparture.takeIf { it.length >= 10 }?.substring(0, 10)
             ?: return raw.map { Stop(it.name, it.code, it.arrival, it.departure) }
         var date = java.time.LocalDate.parse(datePart)
-        var lastClock = legDeparture.substring(11, 19)
+        var lastSeconds = secondsOfDay(legDeparture)
         fun full(t: String): String {
-            if (t.length < 8) return ""
-            val clock = t.substring(0, 8)
-            if (clock < lastClock) date = date.plusDays(1)
-            lastClock = clock
+            val seconds = secondsOfDay(t) ?: return ""
+            if (lastSeconds != null) {
+                val delta = seconds - lastSeconds!!
+                if (delta < -HALF_DAY_SECONDS) date = date.plusDays(1)
+                else if (delta > HALF_DAY_SECONDS) date = date.minusDays(1)
+            }
+            lastSeconds = seconds
             return "${date}T$t"
         }
         return raw.map { Stop(it.name, it.code, full(it.arrival), full(it.departure)) }
+    }
+
+    /** `HH:mm:ss…` (Stop) or `yyyy-MM-ddTHH:mm:ss…` (leg) to seconds since midnight, or null. */
+    private fun secondsOfDay(t: String): Int? {
+        val clock = when {
+            t.length >= 19 && t[10] == 'T' -> t.substring(11, 19)
+            t.length >= 8 -> t.substring(0, 8)
+            else -> return null
+        }
+        val parts = clock.split(':')
+        if (parts.size != 3) return null
+        val h = parts[0].toIntOrNull() ?: return null
+        val m = parts[1].toIntOrNull() ?: return null
+        val s = parts[2].toIntOrNull() ?: return null
+        return h * 3600 + m * 60 + s
     }
 
     // --- 運行情報 (operationLine/service/rescuenow/information) --------------------------------
