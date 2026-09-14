@@ -20,6 +20,10 @@ class RouteTileService : CourseTileBase() {
     /** Tapping the tile opens the app on the 経路 page. */
     override val launchPage: Int = MainActivity.PAGE_ROUTE
 
+    /** The shown leg advances each time a non-walk leg's arrival passes. */
+    override fun changePoints(course: Course): List<Long> =
+        course.lines.filter { it.type != "walk" }.mapNotNull { CourseLogic.epoch(it.arrival) }
+
     override fun layout(course: Course?, now: Long): LayoutElement {
         if (course == null) return column(titleRow("経路"), spacer(40f), text("経路がありません", 13f, AwArgb.SECONDARY, align = LayoutElementBuilders.TEXT_ALIGN_CENTER), horizontalAlign = LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)
 

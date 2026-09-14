@@ -12,7 +12,8 @@ import dev.sfehhrths.ekispertwear.shared.Course
 
 /**
  * イマココ tile: a window of the stop sequence around the estimated current position
- * (previous / current / next stations) drawn like the app page. Re-requested every minute.
+ * (previous / current / next stations) drawn like the app page. Advances through the stops via
+ * the timeline built from [changePoints]; the minute re-request is only a backstop.
  */
 class ImakokoTileService : CourseTileBase() {
 
@@ -20,6 +21,15 @@ class ImakokoTileService : CourseTileBase() {
 
     /** Tapping the tile opens the app on the イマココ page. */
     override val launchPage: Int = MainActivity.PAGE_IMAKOKO
+
+    /**
+     * [CourseLogic.position] can change at every node arrival, departure, and one minute after
+     * the departure (the "still stopped" grace period).
+     */
+    override fun changePoints(course: Course): List<Long> =
+        CourseLogic.sequence(course).nodes.flatMap { n ->
+            listOfNotNull(n.arrival, n.departure, n.departure?.let { it + 60_000 })
+        }
 
     override fun layout(course: Course?, now: Long): LayoutElement {
         if (course == null) return column(titleRow("イマココ"), spacer(40f), text("経路がありません", 13f, AwArgb.SECONDARY, align = LayoutElementBuilders.TEXT_ALIGN_CENTER), horizontalAlign = LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER)

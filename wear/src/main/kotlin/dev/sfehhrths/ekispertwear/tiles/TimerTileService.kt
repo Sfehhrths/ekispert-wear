@@ -16,8 +16,9 @@ import java.time.Instant
 
 /**
  * タイマー tile: station, 「出発まであと」, live countdown, platform.
- * The countdown is a ProtoLayout dynamic expression, so it ticks without re-requesting the tile;
- * the tile is re-requested every minute to roll over to the next leg.
+ * The countdown is a ProtoLayout dynamic expression, so it ticks without re-requesting the tile.
+ * Rolling over to the next leg (and to "終了") is done by the timeline built from
+ * [changePoints], not by the freshness re-request, which the system may skip.
  */
 class TimerTileService : CourseTileBase() {
 
@@ -25,6 +26,11 @@ class TimerTileService : CourseTileBase() {
 
     /** Tapping the tile opens the app on the タイマー page. */
     override val launchPage: Int = MainActivity.PAGE_TIMER
+
+    /** The target changes at each non-walk departure and finally at the last arrival. */
+    override fun changePoints(course: Course): List<Long> =
+        course.lines.filter { it.type != "walk" }.mapNotNull { CourseLogic.epoch(it.departure) } +
+            listOfNotNull(course.lines.lastOrNull()?.let { CourseLogic.epoch(it.arrival) })
 
     override fun layout(course: Course?, now: Long): LayoutElement {
         val target = course?.let { CourseLogic.timerTarget(it, now) }
@@ -40,7 +46,7 @@ class TimerTileService : CourseTileBase() {
             text(target.stationName, 16f, align = LayoutElementBuilders.TEXT_ALIGN_CENTER),
             spacer(8f),
             text(if (target.isArrival) "到着まであと" else "出発まであと", 12f, AwArgb.SECONDARY),
-            countdownText(target.targetMillis),
+            countdownText(target.targetMillis, now),
             // Directly under the countdown and well inside the bezel (bottom-right clips first).
             row(weightSpacer(), text(platform, 14f, AwArgb.PLATFORM), hspacer(BEZEL_INSET + 6f)),
             horizontalAlign = LayoutElementBuilders.HORIZONTAL_ALIGN_CENTER,
@@ -62,8 +68,11 @@ class TimerTileService : CourseTileBase() {
             .build()
     }
 
-    /** `h:mm:ss` / `m:ss` driven by the platform clock. */
-    private fun countdownText(targetMillis: Long): LayoutElement {
+    /**
+     * `h:mm:ss` / `m:ss` driven by the platform clock. [now] is the start of the timeline entry
+     * this text belongs to (possibly in the future), used only for the static fallback value.
+     */
+    private fun countdownText(targetMillis: Long, now: Long): LayoutElement {
         val remaining = DynamicBuilders.DynamicInstant.platformTimeWithSecondsPrecision()
             .durationUntil(DynamicBuilders.DynamicInstant.withSecondsPrecision(Instant.ofEpochMilli(targetMillis)))
         // Clamp at zero: max(0, seconds).
@@ -83,7 +92,7 @@ class TimerTileService : CourseTileBase() {
 
         return LayoutElementBuilders.Text.Builder()
             .setText(
-                TypeBuilders.StringProp.Builder(CourseLogic.countdown(targetMillis - System.currentTimeMillis()))
+                TypeBuilders.StringProp.Builder(CourseLogic.countdown(targetMillis - now))
                     .setDynamicValue(dynamic)
                     .build(),
             )

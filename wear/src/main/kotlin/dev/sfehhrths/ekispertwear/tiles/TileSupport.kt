@@ -35,11 +35,24 @@ object AwArgb {
 
 /**
  * Common plumbing for the three tiles: builds the Tile from a layout, resources, click-to-open
- * (on the page named by [launchPage]). Subclasses implement [layout] and [launchPage].
+ * (on the page named by [launchPage]). Subclasses implement [layout], [changePoints] and
+ * [launchPage].
+ *
+ * Time-dependent content is delivered as a ProtoLayout timeline: one entry per interval between
+ * consecutive [changePoints], each rendered by [layout] as of the start of its interval. The
+ * renderer swaps entries itself when the clock reaches the next boundary, so the tile moves on
+ * (next leg, next station, "終了") even when the system never honours [freshnessMillis] — the
+ * freshness re-request is only a backstop that picks up late data changes.
  */
 abstract class CourseTileBase : TileService() {
 
     abstract fun layout(course: Course?, now: Long): LayoutElement
+
+    /**
+     * Instants (epoch millis) at which [layout] may start producing a different result for this
+     * course. Order and duplicates do not matter; instants in the past are ignored.
+     */
+    abstract fun changePoints(course: Course): List<Long>
 
     /** Re-request interval; 0 = only when the app asks. */
     open val freshnessMillis: Long = 0
@@ -51,22 +64,51 @@ abstract class CourseTileBase : TileService() {
         CallbackToFutureAdapter.getFuture { completer ->
             CourseStore.init(this)
             val course = CourseStore.payload.value?.course
-            val root = LayoutElementBuilders.Box.Builder()
-                .setWidth(expand())
-                .setHeight(expand())
-                // Box centres its child by default; we lay out from the top like system tiles.
-                .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_TOP)
-                .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(openAppClickable()).build())
-                .addContent(layout(course, System.currentTimeMillis()))
-                .build()
             val tile = TileBuilders.Tile.Builder()
                 .setResourcesVersion(RESOURCES_VERSION)
-                .setTileTimeline(TimelineBuilders.Timeline.fromLayoutElement(root))
+                .setTileTimeline(timeline(course, System.currentTimeMillis()))
                 .apply { if (freshnessMillis > 0) setFreshnessIntervalMillis(freshnessMillis) }
                 .build()
             completer.set(tile)
             "tile"
         }
+
+    private fun timeline(course: Course?, now: Long): TimelineBuilders.Timeline {
+        val points = course?.let { changePoints(it) }.orEmpty()
+            .filter { it > now }
+            .distinct()
+            .sorted()
+            .take(MAX_TIMELINE_ENTRIES - 1)
+        if (points.isEmpty()) return TimelineBuilders.Timeline.fromLayoutElement(root(layout(course, now)))
+
+        // Entries are contiguous and non-overlapping: [0, p1), [p1, p2), ..., [pN, +inf).
+        // Each is laid out as of its own start (the first as of now), which matches the
+        // `now >= t` / `t > now` comparisons in CourseLogic exactly at the boundaries.
+        val builder = TimelineBuilders.Timeline.Builder()
+        var start = 0L
+        var evalAt = now
+        for (end in points + Long.MAX_VALUE) {
+            builder.addTimelineEntry(
+                TimelineBuilders.TimelineEntry.Builder()
+                    .setValidity(TimelineBuilders.TimeInterval.Builder().setStartMillis(start).setEndMillis(end).build())
+                    .setLayout(LayoutElementBuilders.Layout.Builder().setRoot(root(layout(course, evalAt))).build())
+                    .build(),
+            )
+            start = end
+            evalAt = end
+        }
+        return builder.build()
+    }
+
+    private fun root(content: LayoutElement): LayoutElement =
+        LayoutElementBuilders.Box.Builder()
+            .setWidth(expand())
+            .setHeight(expand())
+            // Box centres its child by default; we lay out from the top like system tiles.
+            .setVerticalAlignment(LayoutElementBuilders.VERTICAL_ALIGN_TOP)
+            .setModifiers(ModifiersBuilders.Modifiers.Builder().setClickable(openAppClickable()).build())
+            .addContent(content)
+            .build()
 
     override fun onTileResourcesRequest(request: RequestBuilders.ResourcesRequest): ListenableFuture<ResourceBuilders.Resources> =
         CallbackToFutureAdapter.getFuture { completer ->
@@ -178,6 +220,12 @@ abstract class CourseTileBase : TileService() {
 
     companion object {
         const val RESOURCES_VERSION = "2"
+
+        /**
+         * Cap on timeline entries per tile (each carries a full layout). Beyond this the last
+         * entry runs to infinity and the freshness re-request has to extend the timeline.
+         */
+        const val MAX_TIMELINE_ENTRIES = 40
 
         /** Right-side inset (dp) keeping right-aligned text clear of the round bezel. */
         const val BEZEL_INSET = 40f
