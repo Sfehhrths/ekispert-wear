@@ -31,6 +31,10 @@ import kotlinx.coroutines.launch
  *
  * Started by [MainActivity] when it sees an active countdown; stops itself once the course is
  * over (or the course goes away), and is stopped by the activity when the user closes the app.
+ * If a *different* course arrives while the app is not on screen (the user is searching on the
+ * phone), the ongoing activity is dropped too: the chip should not follow every phone search,
+ * and a course for tomorrow must not keep the service alive for a day. Re-sends of the same
+ * course (delay updates) keep it. Opening the watch app again re-creates it.
  */
 class CountdownService : Service() {
 
@@ -51,6 +55,9 @@ class CountdownService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var foregrounded = false
 
+    /** `serializeData` of the course the ongoing activity currently tracks. */
+    private var shownCourseKey: String? = null
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -61,6 +68,13 @@ class CountdownService : Service() {
             // StateFlow replays the current course synchronously, so the first startForeground()
             // happens inside onCreate, well within the startForegroundService() deadline.
             CourseStore.payload.collectLatest { payload ->
+                val key = payload?.course?.serializeData
+                if (foregrounded && key != shownCourseKey && !MainActivity.isOnScreen) {
+                    Log.i(TAG, "course changed while app not on screen, dropping ongoing activity")
+                    finish()
+                    return@collectLatest
+                }
+                shownCourseKey = key
                 while (true) {
                     val now = System.currentTimeMillis()
                     val target = payload?.course?.let { CourseLogic.timerTarget(it, now) }

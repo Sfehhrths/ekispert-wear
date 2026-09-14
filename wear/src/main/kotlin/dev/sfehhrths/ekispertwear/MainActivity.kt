@@ -96,6 +96,14 @@ class MainActivity : ComponentActivity() {
 
         /** Int extra: page to show on launch (one of the PAGE_* constants). Set by the tiles. */
         const val EXTRA_PAGE = "page"
+
+        /**
+         * True while the activity is started (on screen, including ambient). [CountdownService]
+         * uses it to drop the ongoing activity when the course changes behind the user's back.
+         */
+        @Volatile
+        var isOnScreen: Boolean = false
+            private set
     }
 
     private var ambient by mutableStateOf<AmbientState?>(null)
@@ -117,7 +125,7 @@ class MainActivity : ComponentActivity() {
     /**
      * Held while in ambient mode with a countdown so the CPU keeps ticking once a second; without
      * it the process is suspended after ~10 s and the countdown freezes for tens of seconds.
-     * Costs battery for the whole countdown. Only meaningful together with [AMBIENT_SECONDS].
+     * Costs battery for the whole countdown. See [AMBIENT_WAKE_LOCK].
      */
     private var ambientWakeLock: PowerManager.WakeLock? = null
 
@@ -184,7 +192,13 @@ class MainActivity : ComponentActivity() {
         pageRequest = PageRequest(page, (pageRequest?.seq ?: 0L) + 1)
     }
 
+    override fun onStart() {
+        super.onStart()
+        isOnScreen = true
+    }
+
     override fun onStop() {
+        isOnScreen = false
         // Screen fully off or app moved away: nothing to draw, so stop burning CPU.
         releaseAmbientWakeLock()
         super.onStop()
