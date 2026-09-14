@@ -81,4 +81,7 @@ dependencies {
     implementation(libs.wear.protolayout.material)
     implementation(libs.wear.protolayout.expression)
     implementation(libs.concurrent.futures)
+    // Always-on (AmbientLifecycleObserver) and the Ongoing Activity chip on the watch face.
+    implementation(libs.wear.core)
+    implementation(libs.wear.ongoing)
 }
