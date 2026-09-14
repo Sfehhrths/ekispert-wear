@@ -7,6 +7,7 @@ import android.net.Uri
 import android.util.Log
 import dev.sfehhrths.ekispertwear.CourseRepository
 import dev.sfehhrths.ekispertwear.Logs
+import dev.sfehhrths.ekispertwear.PoolOrigin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,10 @@ class TapReceiver : BroadcastReceiver() {
                     return
                 }
                 when (path) {
-                    TapContract.ROUTE_SEARCH_PATH -> repo.onRouteSearchResult(gunzip(intent) ?: return, ts)
+                    TapContract.ROUTE_SEARCH_PATH ->
+                        repo.onCoursesReceived(gunzip(intent) ?: return, PoolOrigin.SEARCH, ts)
+                    TapContract.COURSE_EDIT_PATH ->
+                        repo.onCoursesReceived(gunzip(intent) ?: return, PoolOrigin.EDIT, ts)
                     TapContract.SERVICE_INFO_PATH -> repo.onServiceInformation(gunzip(intent) ?: return, ts)
                     TapContract.REALTIME_TRIP_PATH -> repo.onRealtimeTrip(gunzip(intent) ?: return, ts)
                     else -> Log.d(Logs.TAG, "ignore http_response $path")
@@ -70,20 +74,18 @@ class TapReceiver : BroadcastReceiver() {
 
             TapContract.KIND_SELECTED_COURSE -> {
                 val presenter = intent.getStringExtra(TapContract.EXTRA_PRESENTER) ?: ""
-                val index = intent.getIntExtra(TapContract.EXTRA_COURSE_INDEX, -1)
-                if (presenter !in TapContract.ROUTE_SEARCH_PRESENTERS || index < 0) {
-                    Log.d(Logs.TAG, "ignore selected_course index=$index presenter=$presenter")
+                val keys = intent.getStringArrayExtra(TapContract.EXTRA_COURSE_KEYS)?.toList().orEmpty()
+                if (keys.isEmpty()) {
+                    Log.w(Logs.TAG, "selected_course from $presenter carries no keys; patch/app mismatch?")
                     return
                 }
-                repo.onCourseSelected(index, ts)
+                repo.onCourseSelected(keys, presenter, ts)
             }
 
             TapContract.KIND_TRANSFER_ALARM_COURSE -> {
                 val body = gunzip(intent) ?: return
                 repo.onTransferAlarmCourse(body, ts)
             }
-
-            TapContract.KIND_DETAIL_OPENED -> repo.onDetailOpened(ts)
 
             TapContract.KIND_MYCLIP_COURSE -> {
                 val body = gunzip(intent) ?: return

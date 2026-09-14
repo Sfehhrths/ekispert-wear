@@ -10,8 +10,9 @@ import org.xmlpull.v1.XmlPullParser
 import java.io.StringReader
 
 /**
- * Parses the Ekispert `search/course/extreme` response (`ResultSet/Course[]`) into the shared
- * wire model. Also accepts the single-course XML the app stores for transfer alarms.
+ * Parses an Ekispert `ResultSet/Course[]` response (`search/course/extreme`, `course/edit`)
+ * into the shared wire model. Also accepts the single-course XML the app stores for MyClip
+ * and transfer alarms.
  *
  * Only the subset needed on the watch is extracted; everything else is skipped.
  */
@@ -34,6 +35,7 @@ object EkispertXmlParser {
     private fun readCourse(p: XmlPullParser): Course {
         val searchType = p.getAttributeValue(null, "searchType")
         var index = 0
+        var serializeData: String? = null
         var transferCount = 0
         var timeOnBoard = 0
         var timeWalk = 0
@@ -60,6 +62,8 @@ object EkispertXmlParser {
                         }
                     }
                 }
+
+                "SerializeData" -> serializeData = p.text().trim().ifEmpty { null }
 
                 "Price" -> {
                     when (p.getAttributeValue(null, "kind")) {
@@ -88,6 +92,7 @@ object EkispertXmlParser {
         }
         return Course(
             index = index,
+            serializeData = serializeData,
             searchType = searchType,
             transferCount = transferCount,
             timeOnBoard = timeOnBoard,

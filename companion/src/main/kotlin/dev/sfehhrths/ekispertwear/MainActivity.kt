@@ -50,7 +50,10 @@ class MainActivity : ComponentActivity() {
                         Text("Ekispert Wear companion", style = MaterialTheme.typography.titleLarge)
                         Spacer(Modifier.height(8.dp))
                         Text("last event: ${state.lastEvent} @ ${fmtTs(state.lastEventAt)}")
-                        Text("search result: ${state.searchCourses.size} courses @ ${fmtTs(state.searchedAt)}")
+                        Text(
+                            "course pool: ${state.pool.size} courses, latest @ " +
+                                fmtTs(state.pool.firstOrNull()?.receivedAt ?: 0),
+                        )
                         Spacer(Modifier.height(12.dp))
                         val cur = state.current
                         if (cur == null) {

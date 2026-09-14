@@ -34,8 +34,13 @@ enum class CourseSource {
 
 @Serializable
 data class Course(
-    /** `Route@index` (1-based, as in the XML). */
+    /** `Route@index` (1-based, as in the XML). Only meaningful within its own ResultSet. */
     val index: Int,
+    /**
+     * `Course/SerializeData`: the API's opaque identity of this course. The companion uses it
+     * to find the course the user opened in the app among all ResultSets it has received.
+     */
+    val serializeData: String? = null,
     /** `Course@searchType`: departure / arrival / firstTrain / lastTrain / plain. */
     val searchType: String? = null,
     val transferCount: Int,

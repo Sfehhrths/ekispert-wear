@@ -16,8 +16,29 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import java.io.File
 
+/** Where a pooled course came from. Decides the [CourseSource] shown on the watch. */
+@Serializable
+enum class PoolOrigin {
+    /** `search/course/extreme` (one response per sort tab). */
+    SEARCH,
+
+    /** `course/edit` (前後のダイヤ, 区間のダイヤ選択 ...). */
+    EDIT,
+
+    /** Single-course XML of a MyClip (お気に入り) whose detail screen opened. */
+    MYCLIP,
+
+    /** Single-course XML saved when a transfer alarm was set. */
+    TRANSFER_ALARM,
+}
+
 /**
  * Single source of truth on the phone.
+ *
+ * Every `ResultSet/Course` the app receives or loads is kept in a pool keyed by its
+ * `SerializeData`. When the app shows a course in the detail screen the patch sends that
+ * course's `SerializeData` and the pool tells us which course it is, no matter which sort tab,
+ * re-search (前後のダイヤ), MyClip or alarm it came from. Positions/indexes are never used.
  *
  * Policy: "the course the user last touched" wins. Opening / swiping to a course in the
  * detail screen and setting a transfer alarm both replace the current payload; whichever
@@ -26,17 +47,21 @@ import java.io.File
 class CourseRepository private constructor(private val context: Context) {
 
     @Serializable
+    data class PooledCourse(
+        /** `Course/SerializeData`. */
+        val key: String,
+        val origin: PoolOrigin,
+        /** Epoch millis when the ResultSet carrying this course arrived. */
+        val receivedAt: Long,
+        val course: Course,
+    )
+
+    @Serializable
     data class State(
-        /** Courses of the latest `search/course/extreme` response, in ResultSet order. */
-        val searchCourses: List<Course> = emptyList(),
-        val searchedAt: Long = 0,
+        /** Recently seen courses, newest ResultSet first, at most [POOL_MAX]. */
+        val pool: List<PooledCourse> = emptyList(),
         /** Last payload pushed to the watch. */
         val current: CoursePayload? = null,
-        /**
-         * MyClip course loaded for the detail screen that is currently opening. Set by
-         * `myclip_course`, cleared by `detail_opened`; consumed by the next `selected_course`.
-         */
-        val pendingMyClip: Course? = null,
         /** Latest 運行情報 (rescuenow), applied to every course pushed. */
         val serviceInfo: List<EkispertXmlParser.ServiceInformation> = emptyList(),
         val serviceInfoAt: Long = 0,
@@ -49,56 +74,84 @@ class CourseRepository private constructor(private val context: Context) {
     private val _state = MutableStateFlow(load())
     val state: StateFlow<State> = _state
 
-    suspend fun onRouteSearchResult(xml: String, ts: Long) = mutex.withLock {
+    /** A `ResultSet/Course[]` response (route search per sort tab, or course/edit). */
+    suspend fun onCoursesReceived(xml: String, origin: PoolOrigin, ts: Long) = mutex.withLock {
         val courses = EkispertXmlParser.parseCourses(xml)
-        Log.i(Logs.TAG, "route search: ${courses.size} courses (${xml.length} chars)")
-        update { it.copy(searchCourses = courses, searchedAt = ts, lastEvent = "search:${courses.size}", lastEventAt = ts) }
-    }
-
-    /** A detail screen is opening; forget any MyClip course from the previous one. */
-    suspend fun onDetailOpened(ts: Long) = mutex.withLock {
-        if (_state.value.pendingMyClip != null) {
-            update { it.copy(pendingMyClip = null) }
-        }
+        Log.i(Logs.TAG, "$origin: ${courses.size} courses (${xml.length} chars)")
+        val added = pool(courses, origin, ts)
+        update { it.copy(lastEvent = "${origin.name.lowercase()}:$added", lastEventAt = ts) }
     }
 
     /** The detail screen that is opening shows this MyClip course (arrives before selected_course). */
     suspend fun onMyClipCourse(xml: String, ts: Long) = mutex.withLock {
-        val course = EkispertXmlParser.parseCourses(xml).firstOrNull()
-        if (course == null) {
+        val courses = EkispertXmlParser.parseCourses(xml)
+        if (courses.isEmpty()) {
             Log.w(Logs.TAG, "myclip xml had no Course")
             return
         }
-        Log.i(Logs.TAG, "myclip course #${course.index} ${course.departure} -> ${course.arrival}")
-        update { it.copy(pendingMyClip = course, lastEvent = "myclip:${course.index}", lastEventAt = ts) }
+        Log.i(Logs.TAG, "myclip course ${courses.first().departure} -> ${courses.first().arrival}")
+        pool(courses, PoolOrigin.MYCLIP, ts)
+        update { it.copy(lastEvent = "myclip", lastEventAt = ts) }
     }
 
-    suspend fun onCourseSelected(index0: Int, ts: Long) = mutex.withLock {
-        val s = _state.value
-        s.pendingMyClip?.let { myClip ->
-            // MyClip detail screens hold exactly one course; the page index is always 0.
-            Log.i(Logs.TAG, "selected MyClip course #${myClip.index}")
-            push(CoursePayload(CourseSource.MYCLIP, ts, 0, myClip), "selected-myclip:${myClip.index}", ts)
+    /**
+     * The app is showing a course whose String fields are [keys] (one of them is its
+     * SerializeData). Look it up in the pool and push it.
+     */
+    suspend fun onCourseSelected(keys: List<String>, presenter: String, ts: Long) = mutex.withLock {
+        val hit = _state.value.pool.firstOrNull { it.key in keys }
+        if (hit == null) {
+            Log.w(
+                Logs.TAG,
+                "selected course in $presenter not in pool (${_state.value.pool.size} courses); " +
+                    "keys=${keys.map { it.take(24) }}",
+            )
+            update { it.copy(lastEvent = "selected (unknown course)", lastEventAt = ts) }
             return
         }
-        val course = s.searchCourses.getOrNull(index0)
-        if (course == null) {
-            Log.w(Logs.TAG, "selected index $index0 but only ${s.searchCourses.size} courses known")
-            update { it.copy(lastEvent = "selected:$index0 (no result)", lastEventAt = ts) }
-            return
+        val source = when (hit.origin) {
+            PoolOrigin.SEARCH, PoolOrigin.EDIT -> CourseSource.SELECTED
+            PoolOrigin.MYCLIP -> CourseSource.MYCLIP
+            PoolOrigin.TRANSFER_ALARM -> CourseSource.TRANSFER_ALARM
         }
-        Log.i(Logs.TAG, "selected course #${course.index} ${course.departure} -> ${course.arrival}")
-        push(CoursePayload(CourseSource.SELECTED, ts, s.searchedAt, course), "selected:${course.index}", ts)
+        val course = hit.course
+        Log.i(Logs.TAG, "selected ${hit.origin} course #${course.index} ${course.departure} -> ${course.arrival}")
+        push(CoursePayload(source, ts, hit.receivedAt, course), "selected:${hit.origin.name.lowercase()}#${course.index}", ts)
     }
 
     suspend fun onTransferAlarmCourse(xml: String, ts: Long) = mutex.withLock {
-        val course = EkispertXmlParser.parseCourses(xml).firstOrNull()
+        val courses = EkispertXmlParser.parseCourses(xml)
+        val course = courses.firstOrNull()
         if (course == null) {
             Log.w(Logs.TAG, "transfer alarm xml had no Course")
             return
         }
         Log.i(Logs.TAG, "transfer alarm course #${course.index} ${course.departure} -> ${course.arrival}")
-        push(CoursePayload(CourseSource.TRANSFER_ALARM, ts, _state.value.searchedAt, course), "alarm:${course.index}", ts)
+        pool(courses, PoolOrigin.TRANSFER_ALARM, ts)
+        push(CoursePayload(CourseSource.TRANSFER_ALARM, ts, ts, course), "alarm:${course.index}", ts)
+    }
+
+    /**
+     * Adds [courses] to the front of the pool (a course already present is replaced so it
+     * carries the newest origin / timestamp) and trims to [POOL_MAX]. Returns how many had a
+     * SerializeData; courses without one cannot be matched and are dropped.
+     */
+    private fun pool(courses: List<Course>, origin: PoolOrigin, ts: Long): Int {
+        val fresh = courses.mapNotNull { c ->
+            val key = c.serializeData
+            if (key == null) {
+                Log.w(Logs.TAG, "course #${c.index} from $origin has no SerializeData; not pooled")
+                null
+            } else {
+                PooledCourse(key, origin, ts, c)
+            }
+        }
+        if (fresh.isEmpty()) return 0
+        val freshKeys = fresh.mapTo(HashSet()) { it.key }
+        update { s ->
+            s.copy(pool = (fresh + s.pool.filterNot { it.key in freshKeys }).take(POOL_MAX))
+        }
+        return fresh.size
     }
 
     /** 運行情報 XML: remember it and re-apply to the current course if any status changed. */
@@ -182,6 +235,12 @@ class CourseRepository private constructor(private val context: Context) {
     }
 
     companion object {
+        /**
+         * Pool size. A search returns up to 20 courses per sort tab (4 tabs), and 前後のダイヤ
+         * adds a course per step; 200 comfortably covers a session of browsing.
+         */
+        private const val POOL_MAX = 200
+
         @Volatile
         private var instance: CourseRepository? = null
 
